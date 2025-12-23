@@ -447,7 +447,6 @@
   "IDC": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00401/x12_IDC.py",
   "IGI": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00401/x12_IGI.py",
   "III": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00401/x12_III.py",
-  "IIS": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00401/x12_IIS.py",
   "IM": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00401/x12_IM.py",
   "IMA": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00401/x12_IMA.py",
   "IMM": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00401/x12_IMM.py",

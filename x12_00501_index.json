@@ -460,7 +460,6 @@
   "IDC": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00501/x12_IDC.py",
   "IGI": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00501/x12_IGI.py",
   "III": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00501/x12_III.py",
-  "IIS": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00501/x12_IIS.py",
   "IK3": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00501/x12_IK3.py",
   "IK4": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00501/x12_IK4.py",
   "IK5": "https://raw.githubusercontent.com/getBackwind/bwEDI-Scripter-Specs/main/x12_00501/x12_IK5.py",
