@@ -1,0 +1,34 @@
+# Auto-generated. Do not edit by hand.
+from __future__ import annotations
+
+from typing import Optional, Literal
+from bwEDI.segment import Segment, element, id_element
+from bwEDI.x12_types import X12AN
+
+
+class X7(Segment):
+    """
+    X7 - Customs Information
+    
+    Description:
+        To indicate customs information
+    
+    Source:
+        https://www.kasoftware.com/schema/edi/x12/00501/segments/X7/
+    """
+    _id: Literal["X7"] = id_element(name="X7")
+
+    FreeFormInformation: X12AN = element(
+        name="X701",
+        description="Free-form Information",
+        mandatory=True,
+        min_length=1,
+        max_length=30,
+    )
+
+    FreeFormInformation2: Optional[X12AN] = element(
+        name="X702",
+        description="Free-form Information",
+        min_length=1,
+        max_length=30,
+    )
