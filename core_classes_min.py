@@ -38,9 +38,29 @@ class X12TM(str): """Time."""
 class X12N(float): """Numeric."""
 class X12R(float): """Decimal / real number."""
 
-# === Optional type helper ===
-# (Used for fields that can be None)
-OptionalField = Optional
+# === Datatype utility functions ===
+
+def as_X12Nn(value: Any, decimals: int = 0) -> Optional[str]:
+
+def as_X12N0(value: Any) -> Optional[str]:
+
+def as_X12N1(value: Any) -> Optional[str]:
+
+def as_X12N2(value: Any) -> Optional[str]:
+
+def as_X12N3(value: Any) -> Optional[str]:
+
+def as_X12N4(value: Any) -> Optional[str]:
+
+def as_X12N5(value: Any) -> Optional[str]:
+
+def as_X12N6(value: Any) -> Optional[str]:
+
+def as_X12N7(value: Any) -> Optional[str]:
+
+def as_X12N8(value: Any) -> Optional[str]:
+
+def as_X12N9(value: Any) -> Optional[str]:
 
 # === Example pattern ===
 #
