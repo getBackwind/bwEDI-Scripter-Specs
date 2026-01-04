@@ -6,8 +6,9 @@ Takes a "nocodes" JSON (output of strip_codes.py) and generates a Python package
 of segment class definitions.
 
 Grouping:
-- If --grouped true (default): group alphabetically into files: x12_a.py, x12_b.py, ...
-- If --grouped false: put each segment in its own file: <SEG>.py (e.g., BIG.py)
+- If --grouped true (default): group into chunks of 10 segments per file (sorted alphabetically by segment_id):
+    x12_g0001.py, x12_g0002.py, ...
+- If --grouped false: put each segment in its own file: x12_<SEG>.py (e.g., x12_BIG.py)
 
 Backwards compatibility:
 - If a segment/element already exists in the legacy definitions.py AND it was defined
@@ -35,6 +36,7 @@ import re
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
+
 X12_TYPE_MAP: Dict[str, str] = {
     "AN": "X12AN",
     "ID": "X12ID",
@@ -47,8 +49,10 @@ X12_TYPE_MAP: Dict[str, str] = {
     **{f"N{i}": f"X12N{i}" for i in range(10)},
 }
 
+
 def normalize_ws(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
+
 
 def get_call_name(node: ast.AST) -> Optional[str]:
     if isinstance(node, ast.Call):
@@ -59,11 +63,13 @@ def get_call_name(node: ast.AST) -> Optional[str]:
             return fn.attr
     return None
 
+
 def get_kw_str(call: ast.Call, key: str) -> Optional[str]:
     for kw in call.keywords:
         if kw.arg == key and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
             return kw.value.value
     return None
+
 
 def parse_legacy_definitions(path: str) -> Dict[str, Dict[str, Tuple[str, str]]]:
     """Return {SEG: {POS: (attr_name, kind)}} where kind is element/null_element."""
@@ -99,6 +105,7 @@ def parse_legacy_definitions(path: str) -> Dict[str, Dict[str, Tuple[str, str]]]
 
     return seg_map
 
+
 def to_identifier(desc: str) -> str:
     desc = normalize_ws(desc or "")
     if not desc:
@@ -114,6 +121,7 @@ def to_identifier(desc: str) -> str:
         ident += "Value"
     return ident
 
+
 def safe_attr(existing: set[str], cand: str, fallback: str) -> str:
     if not cand or not re.match(r"^[A-Za-z_]\w*$", cand):
         cand = fallback
@@ -127,19 +135,23 @@ def safe_attr(existing: set[str], cand: str, fallback: str) -> str:
     existing.add(cand2)
     return cand2
 
+
 def ann_type(dt: Optional[str], mandatory: bool) -> Tuple[str, str]:
     t = X12_TYPE_MAP.get(dt or "", "str")
     if mandatory:
         return t, t
     return f"Optional[{t}]", t
 
+
 def write_file(path: str, content: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(content)
 
+
 def parse_bool(s: str) -> bool:
     return str(s).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
 
 def build_class_block(seg: Dict[str, Any], legacy: Dict[str, Dict[str, Tuple[str, str]]], needed_types: set[str]) -> str:
     seg_id = seg["segment_id"]
@@ -219,6 +231,7 @@ def build_class_block(seg: Dict[str, Any], legacy: Dict[str, Dict[str, Tuple[str
 
     return "\n".join(cls_lines).rstrip() + "\n"
 
+
 def build_module(module_path: str, class_blocks: List[str], needed_types: set[str]) -> None:
     imports = [
         "# Auto-generated. Do not edit by hand.",
@@ -233,17 +246,92 @@ def build_module(module_path: str, class_blocks: List[str], needed_types: set[st
     content = "\n".join(imports) + "\n\n" + "\n\n".join(class_blocks).rstrip() + "\n"
     write_file(module_path, content)
 
+
+def chunked(iterable: List[Any], size: int) -> List[List[Any]]:
+    return [iterable[i : i + size] for i in range(0, len(iterable), size)]
+
+
+def build_lazy_init(
+    out_dir: str,
+    module_to_segments: Dict[str, List[str]],
+    segments_sorted: List[str],
+) -> None:
+    """
+    Generates a lazy-loading __init__.py that supports:
+        from package import A, B
+    without importing everything eagerly.
+    """
+    # Map SEG -> module_name (without package prefix)
+    symbol_to_module: Dict[str, str] = {}
+    for mod, segs in module_to_segments.items():
+        for seg in segs:
+            symbol_to_module[seg] = mod
+
+    # TYPE_CHECKING imports grouped per module to keep file size reasonable
+    tc_lines: List[str] = []
+    for mod in sorted(module_to_segments.keys()):
+        segs = module_to_segments[mod]
+        if not segs:
+            continue
+        # from .x12_g0001 import AAA, AAB, ...
+        tc_lines.append(f"    from .{mod} import " + ", ".join(segs))
+
+    init_lines: List[str] = [
+        "# Auto-generated. Do not edit by hand.",
+        "from __future__ import annotations",
+        "",
+        "import importlib",
+        "from typing import Any, TYPE_CHECKING",
+        "",
+        f"__all__ = {segments_sorted!r}",
+        "",
+        f"_SYMBOL_TO_MODULE = {symbol_to_module!r}",
+        "",
+        "def __getattr__(name: str) -> Any:",
+        "    mod = _SYMBOL_TO_MODULE.get(name)",
+        "    if mod is None:",
+        "        raise AttributeError(f\"module {__name__!r} has no attribute {name!r}\")",
+        "    m = importlib.import_module(f\"{__name__}.{mod}\")",
+        "    obj = getattr(m, name)",
+        "    globals()[name] = obj  # cache",
+        "    return obj",
+        "",
+        "def __dir__() -> list[str]:",
+        "    return sorted(set(globals().keys()) | set(__all__))",
+        "",
+        "if TYPE_CHECKING:",
+        "    # Imported only for type-checkers / IDEs; has no runtime cost.",
+    ]
+    if tc_lines:
+        init_lines.extend(tc_lines)
+    else:
+        init_lines.append("    pass")
+    init_lines.append("")
+
+    write_file(os.path.join(out_dir, "__init__.py"), "\n".join(init_lines))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", required=True, help="Input nocodes JSON")
     ap.add_argument("--definitions", required=True, help="Path to legacy definitions.py (for preserving names)")
     ap.add_argument("--out", required=True, help="Output directory for generated package")
-    ap.add_argument("--base-url", default="", help="Base URL prefix for index JSON values (e.g. https://raw.githubusercontent.com/your-org/x12-definitions/main/x12_00401/)")
+    ap.add_argument(
+        "--base-url",
+        default="",
+        help="Base URL prefix for index JSON values (e.g. https://raw.githubusercontent.com/your-org/x12-definitions/main/x12_00401/)",
+    )
     ap.add_argument("--index-name", default="index.json", help="Filename for generated index JSON")
-    ap.add_argument("--grouped", default="true", help="true: group alphabetically. false: one segment per file")
+    ap.add_argument(
+        "--grouped",
+        default="true",
+        help="true: group into chunks of 10 (alphabetically sorted). false: one segment per file",
+    )
+    ap.add_argument("--group-size", default=10, type=int, help="Chunk size when --grouped true (default 10)")
     args = ap.parse_args()
 
     grouped_mode = parse_bool(args.grouped)
+    group_size = int(args.group_size) if int(args.group_size) > 0 else 10
 
     with open(args.json, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -254,51 +342,6 @@ def main() -> None:
     out_dir = args.out
     os.makedirs(out_dir, exist_ok=True)
 
-    init_lines = [
-        "# Auto-generated. Do not edit by hand.",
-        "",
-    ]
-
-    if grouped_mode:
-        grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for seg in segments:
-            seg_id = seg.get("segment_id") or ""
-            if not seg_id:
-                continue
-            letter = seg_id[0].lower()
-            if not ("a" <= letter <= "z"):
-                letter = "other"
-            grouped[letter].append(seg)
-
-        for letter in sorted(grouped.keys()):
-            mod_name = f"x12_{letter}"
-            segs = sorted(grouped[letter], key=lambda s: s.get("segment_id", ""))
-
-            needed_types: set[str] = set()
-            class_blocks: List[str] = []
-            for seg in segs:
-                if seg.get("segment_id"):
-                    class_blocks.append(build_class_block(seg, legacy, needed_types))
-
-            build_module(os.path.join(out_dir, f"{mod_name}.py"), class_blocks, needed_types)
-            init_lines.append(f"from .{mod_name} import *  # noqa: F401,F403")
-
-    else:
-        for seg in sorted(segments, key=lambda s: s.get("segment_id", "")):
-            seg_id = seg.get("segment_id") or ""
-            if not seg_id:
-                continue
-            mod_name = seg_id
-            needed_types: set[str] = set()
-            class_blocks = [build_class_block(seg, legacy, needed_types)]
-            build_module(os.path.join(out_dir, f"x12_{mod_name}.py"), class_blocks, needed_types)
-            init_lines.append(f"from .x12_{mod_name} import {seg_id}  # noqa: F401")
-
-    init_lines.append("")
-    # Build index JSON mapping SEG -> URL to the module file (or grouped module)
-    # The URL is base-url + filename. If base-url is empty, store relative filename only.
-    index: Dict[str, str] = {}
-
     def _join_url(base_url: str, filename: str) -> str:
         base_url = (base_url or "").strip()
         if not base_url:
@@ -307,39 +350,68 @@ def main() -> None:
             base_url += "/"
         return base_url + filename
 
+    # sort segments alphabetically by segment_id
+    segments_sorted = sorted(
+        [s for s in segments if (s.get("segment_id") or "").strip()],
+        key=lambda s: s.get("segment_id", ""),
+    )
+    seg_ids_sorted = [s["segment_id"] for s in segments_sorted]
+
+    # Build index JSON mapping SEG -> URL to the module file
+    index: Dict[str, str] = {}
+
+    # Build module_to_segments for __init__.py generation
+    module_to_segments: Dict[str, List[str]] = {}
+
     if grouped_mode:
-        # Map each segment to its grouped module file name (x12_a.py etc)
-        grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for seg in segments:
+        groups = chunked(segments_sorted, group_size)
+        for i, segs in enumerate(groups, start=1):
+            mod_name = f"x12_g{i:04d}"
+            needed_types: set[str] = set()
+            class_blocks: List[str] = []
+
+            this_seg_ids: List[str] = []
+            for seg in segs:
+                seg_id = seg.get("segment_id") or ""
+                if not seg_id:
+                    continue
+                this_seg_ids.append(seg_id)
+                class_blocks.append(build_class_block(seg, legacy, needed_types))
+
+            build_module(os.path.join(out_dir, f"{mod_name}.py"), class_blocks, needed_types)
+            module_to_segments[mod_name] = this_seg_ids
+
+            filename = f"{mod_name}.py"
+            for seg_id in this_seg_ids:
+                index[seg_id] = _join_url(args.base_url, filename)
+
+    else:
+        for seg in segments_sorted:
             seg_id = seg.get("segment_id") or ""
             if not seg_id:
                 continue
-            letter = seg_id[0].lower()
-            if not ("a" <= letter <= "z"):
-                letter = "other"
-            grouped[letter].append(seg)
+            mod_name = f"x12_{seg_id}"
+            needed_types: set[str] = set()
+            class_blocks = [build_class_block(seg, legacy, needed_types)]
+            build_module(os.path.join(out_dir, f"{mod_name}.py"), class_blocks, needed_types)
 
-        for letter, segs in grouped.items():
-            filename = f"x12_{letter}.py"
-            for seg in segs:
-                seg_id = seg.get("segment_id") or ""
-                if seg_id:
-                    index[seg_id] = _join_url(args.base_url, filename)
-    else:
-        for seg in segments:
-            seg_id = seg.get("segment_id") or ""
-            if seg_id:
-                index[seg_id] = _join_url(args.base_url, f"x12_{seg_id}.py")
+            module_to_segments[mod_name] = [seg_id]
+            index[seg_id] = _join_url(args.base_url, f"{mod_name}.py")
 
     # Write index json
     index_path = os.path.join(out_dir, args.index_name)
     with open(index_path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(dict(sorted(index.items())), f, ensure_ascii=False, indent=2)
 
-    write_file(os.path.join(out_dir, "__init__.py"), "\n".join(init_lines))
+    # Write lazy-loading __init__.py
+    build_lazy_init(out_dir, module_to_segments, seg_ids_sorted)
 
     print(f"Generated package at: {out_dir}")
-    print(f"Grouping mode: {'alphabetical' if grouped_mode else 'per-segment'}")
+    if grouped_mode:
+        print(f"Grouping mode: chunks of {group_size} (alphabetically sorted)")
+    else:
+        print("Grouping mode: per-segment")
+
 
 if __name__ == "__main__":
     main()
